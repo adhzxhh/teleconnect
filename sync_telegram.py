@@ -68,7 +68,7 @@ if not isinstance(state, dict):
 
 params = {
     "timeout": 1,
-    "allowed_updates": json.dumps(["channel_post"]),
+    "allowed_updates": json.dumps(["message"]),
 }
 if state.get("offset") is not None:
     params["offset"] = int(state["offset"])
@@ -86,12 +86,12 @@ for update in updates:
         continue
     max_update = max(max_update, int(update_id))
 
-    msg = update.get("channel_post")
+    msg = update.get("message")
     if not msg:
         continue
 
     chat = msg.get("chat", {})
-    print(f"Channel post received: chat={chat.get('title', '(untitled)')} id={chat.get('id')} message_id={msg.get('message_id')}")
+    print(f"Group message received: chat={chat.get('title', '(untitled)')} id={chat.get('id')} message_id={msg.get('message_id')}")
 
     if str(update_id) in seen:
         continue
