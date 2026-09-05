@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Tools - files, images and useful links.">
+  <title>Tools — Files & Links</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#">
+      <span class="brand-mark">✦</span>
+      <span>TOOLS</span>
+    </a>
+    <nav>
+      <a href="#files">Files</a>
+      <a href="#links">Links</a>
+      <a href="#telegram">Telegram</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-glow"></div>
+      <div class="hero-content">
+        <div class="eyebrow">DIGITAL TOOLBOX</div>
+        <h1>Everything you need.<br><span>One place.</span></h1>
+        <p>Browse useful tools, files, images and links. New content can be synced from your Telegram channel.</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#files">Explore files</a>
+          <a class="btn ghost" href="#telegram">Join Telegram ↗</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="toolbar" id="files">
+      <div>
+        <div class="section-kicker">LIBRARY</div>
+        <h2>Latest content</h2>
+      </div>
+      <div class="controls">
+        <label class="search">
+          <span>⌕</span>
+          <input id="searchInput" type="search" placeholder="Search tools, files..." aria-label="Search">
+        </label>
+        <select id="categoryFilter" aria-label="Filter by category">
+          <option value="all">All</option>
+          <option value="tools">Tools</option>
+          <option value="apps">Apps</option>
+          <option value="games">Games</option>
+          <option value="images">Images</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="grid" id="contentGrid"></section>
+    <p class="empty" id="emptyState" hidden>No matching content found.</p>
+
+    <section class="telegram" id="telegram">
+      <div>
+        <div class="section-kicker">STAY UPDATED</div>
+        <h2>Get new content on Telegram</h2>
+        <p>Use your channel as the source for new files, images and links. We'll connect automatic syncing in the next step.</p>
+      </div>
+      <a class="btn primary" id="telegramButton" href="#" target="_blank" rel="noopener">Open Telegram ↗</a>
+    </section>
+  </main>
+
+  <footer>
+    <span>© 2026 Tools</span>
+    <span>Built with GitHub Pages</span>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
