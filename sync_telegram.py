@@ -3,65 +3,132 @@ from pathlib import Path
 
 TOKEN = os.environ["BOT_TOKEN"]
 DATA = Path("content.json")
+STATE = Path("telegram_state.json")
 API = f"https://api.telegram.org/bot{TOKEN}"
+
 
 def call(method, params=None):
     params = params or {}
     body = urllib.parse.urlencode(params).encode()
-    with urllib.request.urlopen(urllib.request.Request(f"{API}/{method}", data=body), timeout=30) as r:
-        return json.load(r)
+    req = urllib.request.Request(f"{API}/{method}", data=body)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        result = json.load(r)
+    if not result.get("ok"):
+        raise RuntimeError(f"Telegram API error in {method}: {result.get('description', 'unknown error')}")
+    return result["result"]
 
-def load_items():
-    if not DATA.exists(): return []
-    try: return json.loads(DATA.read_text(encoding="utf-8"))
-    except Exception: return []
+
+def load_json(path, default):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
 
 def category(text):
     m = re.search(r"(?:^|\n)\s*(?:category|cat)\s*:\s*([^\n]+)", text, re.I)
-    return (m.group(1).strip().lower() if m else "tools")
+    return m.group(1).strip().lower() if m else "tools"
+
 
 def clean_title(text):
     first = next((x.strip() for x in text.splitlines() if x.strip()), "Telegram post")
-    if re.match(r"^(category|cat)\s*:", first, re.I): first = "Telegram post"
+    if re.match(r"^(category|cat)\s*:", first, re.I):
+        first = "Telegram post"
     return first[:100]
+
 
 def post_url(chat, message_id):
     username = chat.get("username")
-    if username: return f"https://t.me/{username}/{message_id}"
+    if username:
+        return f"https://t.me/{username}/{message_id}"
     cid = str(chat.get("id", ""))
-    if cid.startswith("-100"): return f"https://t.me/c/{cid[4:]}/{message_id}"
+    if cid.startswith("-100"):
+        return f"https://t.me/c/{cid[4:]}/{message_id}"
     return ""
 
-items = load_items()
-seen = {str(x.get("update_id")) for x in items}
-state = {}
-if Path("telegram_state.json").exists():
-    try: state = json.loads(Path("telegram_state.json").read_text())
-    except Exception: pass
-params = {"timeout": 1, "allowed_updates": json.dumps(["channel_post"])}
-if state.get("offset") is not None: params["offset"] = state["offset"]
-res = call("getUpdates", params)
-max_update = state.get("offset", 0) - 1
-for update in res.get("result", []):
-    max_update = max(max_update, update["update_id"])
+
+# Verify the bot token and report webhook status without exposing the token.
+bot = call("getMe")
+print(f"Bot connected: @{bot.get('username', '(no username)')}")
+webhook = call("getWebhookInfo")
+webhook_url = webhook.get("url", "")
+if webhook_url:
+    raise RuntimeError("Telegram webhook is configured. getUpdates cannot receive updates while a webhook is active.")
+print("Webhook: none (getUpdates is available)")
+
+items = load_json(DATA, [])
+if not isinstance(items, list):
+    items = []
+
+state = load_json(STATE, {})
+if not isinstance(state, dict):
+    state = {}
+
+params = {
+    "timeout": 1,
+    "allowed_updates": json.dumps(["channel_post"]),
+}
+if state.get("offset") is not None:
+    params["offset"] = int(state["offset"])
+
+updates = call("getUpdates", params)
+print(f"Telegram updates received: {len(updates)}")
+
+max_update = int(state.get("offset", 0)) - 1
+seen = {str(x.get("update_id")) for x in items if isinstance(x, dict)}
+new_items = 0
+
+for update in updates:
+    update_id = update.get("update_id")
+    if update_id is None:
+        continue
+    max_update = max(max_update, int(update_id))
+
     msg = update.get("channel_post")
-    if not msg or str(update["update_id"]) in seen: continue
+    if not msg:
+        continue
+
+    chat = msg.get("chat", {})
+    print(f"Channel post received: chat={chat.get('title', '(untitled)')} id={chat.get('id')} message_id={msg.get('message_id')}")
+
+    if str(update_id) in seen:
+        continue
+
     text = (msg.get("text") or msg.get("caption") or "").strip()
-    if not text and not (msg.get("document") or msg.get("photo") or msg.get("video")): continue
-    link = post_url(msg.get("chat", {}), msg["message_id"])
-    item = {
-        "update_id": str(update["update_id"]),
-        "message_id": msg["message_id"],
+    has_media = bool(msg.get("document") or msg.get("photo") or msg.get("video"))
+    if not text and not has_media:
+        continue
+
+    if msg.get("document"):
+        item_type, icon = "FILE", "📦"
+    elif msg.get("photo"):
+        item_type, icon = "IMAGE", "🖼️"
+    elif msg.get("video"):
+        item_type, icon = "VIDEO", "🎬"
+    else:
+        item_type, icon = "LINK", "🔗"
+
+    items.insert(0, {
+        "update_id": str(update_id),
+        "message_id": msg.get("message_id"),
         "title": clean_title(text),
         "description": text[:500],
         "category": category(text),
-        "type": "FILE" if msg.get("document") else ("IMAGE" if msg.get("photo") else "LINK"),
-        "icon": "📦" if msg.get("document") else ("🖼️" if msg.get("photo") else "🔗"),
+        "type": item_type,
+        "icon": icon,
         "date": msg.get("date", 0),
-        "url": link
-    }
-    items.insert(0, item)
+        "url": post_url(chat, msg.get("message_id")),
+    })
+    new_items += 1
+
 items = items[:200]
 DATA.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-Path("telegram_state.json").write_text(json.dumps({"offset": max_update + 1}), encoding="utf-8")
-print(f"Stored {len(items)} items")
+
+# Only advance the offset after Telegram has successfully returned the queue.
+if max_update >= int(state.get("offset", 0)):
+    STATE.write_text(json.dumps({"offset": max_update + 1}), encoding="utf-8")
+
+print(f"New posts stored this run: {new_items}")
+print(f"Total posts stored: {len(items)}")
