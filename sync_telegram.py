@@ -1,4 +1,4 @@
-import json, os, re, urllib.request
+import json, os, re, urllib.request, urllib.parse
 from pathlib import Path
 
 TOKEN = os.environ["BOT_TOKEN"]
@@ -20,13 +20,13 @@ def category(text):
     m = re.search(r"(?:^|\n)\s*(?:category|cat)\s*:\s*([^\n]+)", text, re.I)
     return (m.group(1).strip().lower() if m else "tools")
 
-def clean_title(text, msg):
+def clean_title(text):
     first = next((x.strip() for x in text.splitlines() if x.strip()), "Telegram post")
     if re.match(r"^(category|cat)\s*:", first, re.I): first = "Telegram post"
     return first[:100]
 
 def post_url(chat, message_id):
-    username = getattr(chat, "get", lambda *_: None)("username") if isinstance(chat, dict) else None
+    username = chat.get("username")
     if username: return f"https://t.me/{username}/{message_id}"
     cid = str(chat.get("id", ""))
     if cid.startswith("-100"): return f"https://t.me/c/{cid[4:]}/{message_id}"
@@ -52,7 +52,7 @@ for update in res.get("result", []):
     item = {
         "update_id": str(update["update_id"]),
         "message_id": msg["message_id"],
-        "title": clean_title(text, msg),
+        "title": clean_title(text),
         "description": text[:500],
         "category": category(text),
         "type": "FILE" if msg.get("document") else ("IMAGE" if msg.get("photo") else "LINK"),
