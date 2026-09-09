@@ -4,6 +4,7 @@ from pathlib import Path
 TOKEN = os.environ["BOT_TOKEN"]
 DATA = Path("content.json")
 STATE = Path("telegram_state.json")
+DOWNLOADS = Path("downloads")
 API = f"https://api.telegram.org/bot{TOKEN}"
 
 
@@ -47,6 +48,30 @@ def post_url(chat, message_id):
     if cid.startswith("-100"):
         return f"https://t.me/c/{cid[4:]}/{message_id}"
     return ""
+
+
+def safe_filename(name, fallback):
+    name = os.path.basename(name or "")
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    return (name or fallback)[:180]
+
+
+def download_file(file_id, filename):
+    info = call("getFile", {"file_id": file_id})
+    file_path = info.get("file_path")
+    if not file_path:
+        return ""
+
+    filename = safe_filename(filename, Path(file_path).name or "file")
+    destination = DOWNLOADS / filename
+    DOWNLOADS.mkdir(parents=True, exist_ok=True)
+
+    if destination.exists():
+        return destination.as_posix()
+
+    url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+    urllib.request.urlretrieve(url, destination)
+    return destination.as_posix()
 
 
 # Verify the bot token and report webhook status without exposing the token.
@@ -101,14 +126,29 @@ for update in updates:
     if not text and not has_media:
         continue
 
-    if msg.get("document"):
-        item_type, icon = "FILE", "📦"
-    elif msg.get("photo"):
-        item_type, icon = "IMAGE", "🖼️"
-    elif msg.get("video"):
-        item_type, icon = "VIDEO", "🎬"
-    else:
-        item_type, icon = "LINK", "🔗"
+    download_url = ""
+    filename = ""
+    try:
+        if msg.get("document"):
+            doc = msg["document"]
+            filename = safe_filename(doc.get("file_name"), f"telegram_{msg.get('message_id')}.bin")
+            item_type, icon = "FILE", "📦"
+            download_url = download_file(doc["file_id"], f"{msg.get('message_id')}_{filename}")
+        elif msg.get("photo"):
+            photo = msg["photo"][-1]
+            filename = f"{msg.get('message_id')}.jpg"
+            item_type, icon = "IMAGE", "🖼️"
+            download_url = download_file(photo["file_id"], filename)
+        elif msg.get("video"):
+            video = msg["video"]
+            filename = safe_filename(video.get("file_name"), f"telegram_{msg.get('message_id')}.mp4")
+            item_type, icon = "VIDEO", "🎬"
+            download_url = download_file(video["file_id"], f"{msg.get('message_id')}_{filename}")
+        else:
+            item_type, icon = "LINK", "🔗"
+    except Exception as exc:
+        print(f"Media download failed; keeping Telegram link: {exc}")
+        download_url = ""
 
     items.insert(0, {
         "update_id": str(update_id),
@@ -120,6 +160,8 @@ for update in updates:
         "icon": icon,
         "date": msg.get("date", 0),
         "url": post_url(chat, msg.get("message_id")),
+        "download_url": download_url,
+        "filename": filename,
     })
     new_items += 1
 
