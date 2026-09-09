@@ -1,4 +1,4 @@
-name: Sync Telegram Channel
+name: Sync Telegram Group
 
 on:
   schedule:
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Sync Telegram posts
+      - name: Sync Telegram group
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: python sync_telegram.py
@@ -38,6 +38,7 @@ jobs:
         run: |
           git config user.name "telegram-sync[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add content.json telegram_state.json downloads/
+          git add content.json telegram_state.json
+          git add downloads/ 2>/dev/null || true
           git diff --cached --quiet || git commit -m "Sync Telegram content"
           git push
