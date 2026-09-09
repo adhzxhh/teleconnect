@@ -34,10 +34,10 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: python sync_telegram.py
 
-      - name: Commit updated content
+      - name: Commit updated content and downloads
         run: |
           git config user.name "telegram-sync[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add content.json telegram_state.json
+          git add content.json telegram_state.json downloads/
           git diff --cached --quiet || git commit -m "Sync Telegram content"
           git push
