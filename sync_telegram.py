@@ -33,11 +33,13 @@ def category(text):
     return m.group(1).strip().lower() if m else "tools"
 
 
-def clean_title(text):
-    first = next((x.strip() for x in text.splitlines() if x.strip()), "Telegram post")
-    if re.match(r"^(category|cat)\s*:", first, re.I):
-        first = "Telegram post"
-    return first[:100]
+def clean_title(text, filename=""):
+    first = next((x.strip() for x in text.splitlines() if x.strip()), "")
+    if first and not re.match(r"^(category|cat)\s*:", first, re.I):
+        return first[:100]
+    if filename:
+        return filename[:100]
+    return "Telegram post"
 
 
 def post_url(chat, message_id):
@@ -150,11 +152,14 @@ for update in updates:
         print(f"Media download failed; keeping Telegram link: {exc}")
         download_url = ""
 
+    title = clean_title(text, filename)
+    description = text[:500] if text else filename
+
     items.insert(0, {
         "update_id": str(update_id),
         "message_id": msg.get("message_id"),
-        "title": clean_title(text),
-        "description": text[:500],
+        "title": title,
+        "description": description,
         "category": category(text),
         "type": item_type,
         "icon": icon,
