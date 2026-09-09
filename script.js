@@ -42,8 +42,13 @@ function render() {
 
   grid.innerHTML = filtered.map(item => {
     const type = String(item.type || "LINK").toUpperCase();
-    const icon = item.icon || (type === "FILE" ? "📦" : type === "IMAGE" ? "🖼️" : "🔗");
+    const icon = item.icon || (type === "FILE" ? "📦" : type === "IMAGE" ? "🖼️" : type === "VIDEO" ? "🎬" : "🔗");
     const url = item.url || TELEGRAM_CHANNEL_URL;
+    const downloadUrl = item.download_url || "";
+    const action = downloadUrl
+      ? `<a class="btn primary" href="${escapeAttr(downloadUrl)}" download="${escapeAttr(item.filename || "")}">DOWNLOAD ↓</a>`
+      : `<a class="btn primary" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">${type === "LINK" ? "OPEN ↗" : "VIEW →"}</a>`;
+
     return `
       <article class="card">
         <div class="thumb">
@@ -55,9 +60,7 @@ function render() {
           <p>${escapeHtml(item.description || "")}</p>
           <div class="card-footer">
             <span class="meta">${escapeHtml(formatDate(item.date))}</span>
-            <a class="btn primary" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">
-              ${type === "LINK" ? "OPEN ↗" : "VIEW →"}
-            </a>
+            ${action}
           </div>
         </div>
       </article>
