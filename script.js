@@ -31,34 +31,34 @@ function formatDate(value) {
   return String(value);
 }
 
-// Automatically recognize common multi-part naming styles:
-// Part 1, Part1, Pt 1, 01, (1), _1, -1, etc.
-function partInfo(item) {
-  const name = String(item.filename || item.title || "").trim();
-  const withoutExt = name.replace(/\.[^.]+$/, "");
+function cleanName(item) {
+  return String(item.filename || item.title || "")
+    .trim()
+    .replace(/\.[^.]+$/, "")
+    .replace(/[._\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  let match = withoutExt.match(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?(\d+)$/i);
+// Recognize explicit multipart names such as Part 1, Part1, .part1, Pt 1,
+// (1), _01 and -01.
+function partInfo(item) {
+  const original = String(item.filename || item.title || "").trim();
+  const name = original.replace(/\.[^.]+$/, "");
+  let match = name.match(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?(\d+)$/i);
+
   if (match) {
     const partNumber = Number(match[1]);
-    const base = withoutExt.slice(0, match.index + (match[0].startsWith(" ") || match[0].startsWith(".") || match[0].startsWith("_") || match[0].startsWith("-") ? 0 : 0))
-      .replace(/(?:part|pt)[ ._\-]?\d+$/i, "")
-      .replace(/[._\-]+$/, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    return { key: base.toLowerCase(), partNumber };
+    const base = name.slice(0, match.index).replace(/[._\-]+$/, "").trim();
+    return { key: base.toLowerCase(), partNumber, explicit: true };
   }
 
-  match = withoutExt.match(/(?:^|[ ._\-])\((\d+)\)$/);
-  if (!match) match = withoutExt.match(/(?:^|[._\-])0*(\d+)$/);
+  match = name.match(/(?:^|[ ._\-])\((\d+)\)$/);
+  if (!match) match = name.match(/(?:^|[._\-])0*(\d+)$/);
   if (match) {
     const partNumber = Number(match[1]);
-    const suffix = match[0];
-    const base = withoutExt.slice(0, withoutExt.length - suffix.length)
-      .replace(/[._\-]+$/, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    // Only treat numbered suffixes as parts when the number is >= 1.
-    if (partNumber >= 1) return { key: base.toLowerCase(), partNumber };
+    const base = name.slice(0, name.length - match[0].length).replace(/[._\-]+$/, "").trim();
+    if (partNumber >= 1) return { key: base.toLowerCase(), partNumber, explicit: true };
   }
 
   return null;
@@ -66,27 +66,64 @@ function partInfo(item) {
 
 function groupItems(source) {
   const groups = [];
-  const grouped = new Map();
+  const explicitGroups = new Map();
+  const unnamedGroups = new Map();
 
+  // First pass: explicitly numbered multipart files.
   source.forEach(item => {
     const info = partInfo(item);
-    if (!info) {
-      groups.push({ single: item });
+    if (info) {
+      const groupKey = `${String(item.category || "other").toLowerCase()}::${info.key}`;
+      if (!explicitGroups.has(groupKey)) {
+        const group = { parts: [], first: item, partKey: info.key };
+        explicitGroups.set(groupKey, group);
+        groups.push(group);
+      }
+      explicitGroups.get(groupKey).parts.push({ item, partNumber: info.partNumber });
       return;
     }
 
-    const groupKey = `${String(item.category || "other").toLowerCase()}::${info.key}`;
-    if (!grouped.has(groupKey)) {
-      const group = { parts: [], first: item, key: groupKey, partKey: info.key };
-      grouped.set(groupKey, group);
-      groups.push(group);
+    const filename = String(item.filename || item.title || "").trim().toLowerCase();
+    const category = String(item.category || "other").toLowerCase();
+    const key = `${category}::${filename}`;
+    if (!unnamedGroups.has(key)) unnamedGroups.set(key, []);
+    unnamedGroups.get(key).push(item);
+  });
+
+  // Second pass: if several files have exactly the same filename, treat the
+  // consecutive Telegram uploads as unnamed parts instead of separate cards.
+  unnamedGroups.forEach(list => {
+    if (list.length === 1) {
+      groups.push({ single: list[0] });
+      return;
     }
-    grouped.get(groupKey).parts.push({ item, partNumber: info.partNumber });
+
+    const sorted = [...list].sort((a, b) => Number(a.message_id || 0) - Number(b.message_id || 0));
+    const ids = sorted.map(x => Number(x.message_id)).filter(Number.isFinite);
+    const consecutive = ids.length === sorted.length && (Math.max(...ids) - Math.min(...ids) <= sorted.length + 2);
+
+    if (consecutive) {
+      const first = sorted[0];
+      groups.push({
+        parts: sorted.map((item, index) => ({ item, partNumber: index + 1 })),
+        first,
+        partKey: cleanName(first).toLowerCase()
+      });
+    } else {
+      list.forEach(item => groups.push({ single: item }));
+    }
   });
 
   groups.forEach(group => {
-    if (!group.parts) return;
-    group.parts.sort((a, b) => a.partNumber - b.partNumber);
+    if (group.parts) group.parts.sort((a, b) => a.partNumber - b.partNumber);
+  });
+
+  // Keep the normal newest-first ordering while keeping multipart cards near
+  // the newest message that belongs to each group.
+  groups.sort((a, b) => {
+    const aDate = Number(a.first?.date || 0);
+    const bDate = Number(b.first?.date || 0);
+    return bDate - aDate;
   });
 
   return groups;
