@@ -31,22 +31,37 @@ function formatDate(value) {
   return String(value);
 }
 
-// Detect names such as "Part 1", "part1", "Part-1", "Pt 1" and "pt1".
+// Automatically recognize common multi-part naming styles:
+// Part 1, Part1, Pt 1, 01, (1), _1, -1, etc.
 function partInfo(item) {
   const name = String(item.filename || item.title || "").trim();
-  const match = name.match(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?(\d+)(?=\b|[._\-])/i);
-  if (!match) return null;
+  const withoutExt = name.replace(/\.[^.]+$/, "");
 
-  const partNumber = Number(match[1]);
-  const base = name
-    .replace(/\.[^.]+$/, "")
-    .replace(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?\d+(?=\b|[._\-])/ig, "")
-    .replace(/[._\-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+  let match = withoutExt.match(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?(\d+)$/i);
+  if (match) {
+    const partNumber = Number(match[1]);
+    const base = withoutExt.slice(0, match.index + (match[0].startsWith(" ") || match[0].startsWith(".") || match[0].startsWith("_") || match[0].startsWith("-") ? 0 : 0))
+      .replace(/(?:part|pt)[ ._\-]?\d+$/i, "")
+      .replace(/[._\-]+$/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return { key: base.toLowerCase(), partNumber };
+  }
 
-  return { key: base, partNumber };
+  match = withoutExt.match(/(?:^|[ ._\-])\((\d+)\)$/);
+  if (!match) match = withoutExt.match(/(?:^|[._\-])0*(\d+)$/);
+  if (match) {
+    const partNumber = Number(match[1]);
+    const suffix = match[0];
+    const base = withoutExt.slice(0, withoutExt.length - suffix.length)
+      .replace(/[._\-]+$/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    // Only treat numbered suffixes as parts when the number is >= 1.
+    if (partNumber >= 1) return { key: base.toLowerCase(), partNumber };
+  }
+
+  return null;
 }
 
 function groupItems(source) {
@@ -62,7 +77,7 @@ function groupItems(source) {
 
     const groupKey = `${String(item.category || "other").toLowerCase()}::${info.key}`;
     if (!grouped.has(groupKey)) {
-      const group = { parts: [], first: item, key: groupKey };
+      const group = { parts: [], first: item, key: groupKey, partKey: info.key };
       grouped.set(groupKey, group);
       groups.push(group);
     }
@@ -87,12 +102,7 @@ function render() {
   });
 
   const groups = groupItems(filtered);
-
-  grid.innerHTML = groups.map(group => {
-    if (group.single) return renderSingle(group.single);
-    return renderGroup(group);
-  }).join("");
-
+  grid.innerHTML = groups.map(group => group.single ? renderSingle(group.single) : renderGroup(group)).join("");
   empty.hidden = groups.length !== 0;
 }
 
@@ -126,12 +136,7 @@ function renderSingle(item) {
 function renderGroup(group) {
   const first = group.first;
   const count = group.parts.length;
-  const title = String(first.filename || first.title || "Multi-part file")
-    .replace(/\.[^.]+$/, "")
-    .replace(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?\d+/i, "")
-    .replace(/[._\-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const title = group.partKey.replace(/\b\w/g, c => c.toUpperCase());
   const category = String(first.category || "other").toUpperCase();
 
   const buttons = group.parts.map(({ item, partNumber }) => {
