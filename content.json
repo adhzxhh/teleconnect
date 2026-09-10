@@ -272,7 +272,9 @@
     "date": 1789012488,
     "url": "https://t.me/c/3587111527/42",
     "download_url": "downloads/42_LocalSend-1.17.0-windows-x86-64.rar",
-    "filename": "LocalSend-1.17.0-windows-x86-64.rar"
+    "filename": "LocalSend-1.17.0-windows-x86-64.rar",
+    "display_title": "LocalSend",
+    "part_group": "localsend-1.17.0-windows-x86"
   },
   {
     "update_id": "354354113",
