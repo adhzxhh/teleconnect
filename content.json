@@ -104,8 +104,7 @@
     "download_url": "",
     "filename": "Xiaomi_Redmi_9C_MT6765_V12_0_3_0_QCREUXM_20200825_0000_00_EEA_10.rar",
     "display_title": "Xiaomi_Redmi_9C_MT6765.rar",
-    "part_group": "xiaomi_redmi_9c_mt6765_v12_0_3_0_qcreuxm_20200825_0000_00_eea",
-    "part_number": 1
+    "part_disabled": true
   },
   {
     "update_id": "354354126",
