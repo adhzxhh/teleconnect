@@ -35,25 +35,40 @@ jobs:
           if not isinstance(items, list):
               raise SystemExit("content.json is not a list")
 
-          def apply_one(item, data):
-              title = str(data.get("title", "")).strip()
-              description = str(data.get("description", "")).strip()
-              category = str(data.get("category", "other")).strip().lower() or "other"
-              part_group = str(data.get("part_group", "")).strip()
-              part_number = str(data.get("part_number", "")).strip()
-              item["display_title"] = title
-              item["description"] = description
-              item["category"] = category
-              if part_group:
-                  item["part_group"] = part_group
-              else:
-                  item.pop("part_group", None)
-              if part_number:
-                  if not part_number.isdigit() or int(part_number) < 1:
-                      raise SystemExit("part_number must be a number >= 1")
-                  item["part_number"] = int(part_number)
-              else:
+          def clean_part(item, number):
+              """Set a manual part number, or explicitly disable part detection."""
+              if number is None or str(number).strip() == "":
                   item.pop("part_number", None)
+                  item.pop("part_group", None)
+                  item["part_disabled"] = True
+              else:
+                  s = str(number).strip()
+                  if not s.isdigit() or int(s) < 1:
+                      raise SystemExit(f"Invalid part number: {number}")
+                  item["part_number"] = int(s)
+                  item.pop("part_disabled", None)
+
+          def apply_primary(item):
+              item["display_title"] = str(payload.get("title", "")).strip()
+              item["description"] = str(payload.get("description", "")).strip()
+              item["category"] = str(payload.get("category", "other")).strip().lower() or "other"
+              group = str(payload.get("part_group", "")).strip()
+              number = str(payload.get("part_number", "")).strip()
+              if group and number:
+                  item["part_group"] = group
+                  if not number.isdigit() or int(number) < 1:
+                      raise SystemExit("part_number must be a number >= 1")
+                  item["part_number"] = int(number)
+                  item.pop("part_disabled", None)
+              elif payload.get("part_number_changed") is True and not number:
+                  clean_part(item, "")
+              elif group:
+                  item["part_group"] = group
+              else:
+                  # No part group and no explicit part number: make this a true single item.
+                  item.pop("part_group", None)
+                  item.pop("part_number", None)
+                  item["part_disabled"] = True
 
           primary_id = str(payload.get("message_id", "")).strip()
           if not primary_id:
@@ -62,31 +77,29 @@ jobs:
           found = False
           for item in items:
               if str(item.get("message_id", "")) == primary_id:
-                  apply_one(item, payload)
+                  apply_primary(item)
                   found = True
                   break
           if not found:
               raise SystemExit(f"No item found for message_id {primary_id}")
 
-          # A multipart edit can contain the complete set of part-number changes.
-          # Apply every requested part by message_id, not just the item used to open the menu.
-          for part in payload.get("parts", []):
+          # For multipart editing, the browser sends every part explicitly.
+          # Each message_id is updated independently, so Part 2 cannot remain Part 10.
+          requested_parts = payload.get("parts") or []
+          for part in requested_parts:
               part_id = str(part.get("message_id", "")).strip()
               if not part_id:
                   continue
               number = str(part.get("part_number", "")).strip()
               if not number.isdigit() or int(number) < 1:
                   raise SystemExit(f"Invalid part number for message_id {part_id}")
-              matched = False
-              for item in items:
-                  if str(item.get("message_id", "")) == part_id:
-                      item["part_number"] = int(number)
-                      if payload.get("part_group", "").strip():
-                          item["part_group"] = payload["part_group"].strip()
-                      matched = True
-                      break
-              if not matched:
+              target = next((x for x in items if str(x.get("message_id", "")) == part_id), None)
+              if target is None:
                   raise SystemExit(f"No item found for multipart message_id {part_id}")
+              target["part_number"] = int(number)
+              if str(payload.get("part_group", "")).strip():
+                  target["part_group"] = str(payload["part_group"]).strip()
+              target.pop("part_disabled", None)
 
           path.write_text(json.dumps(items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           PY
