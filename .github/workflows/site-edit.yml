@@ -1,0 +1,86 @@
+name: Apply Site Edit
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  edit:
+    if: github.event.issue.user.login == 'adhzxhh'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Apply requested edit
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+
+          body = os.environ.get("ISSUE_BODY", "")
+          match = re.search(r"```json\s*(.*?)\s*```", body, re.S | re.I)
+          if not match:
+              raise SystemExit("No JSON edit block found")
+
+          payload = json.loads(match.group(1))
+          message_id = str(payload.get("message_id", "")).strip()
+          if not message_id:
+              raise SystemExit("Missing message_id")
+
+          path = Path("content.json")
+          items = json.loads(path.read_text(encoding="utf-8"))
+          if not isinstance(items, list):
+              raise SystemExit("content.json is not a list")
+
+          found = False
+          for item in items:
+              if str(item.get("message_id", "")) != message_id:
+                  continue
+              found = True
+              title = str(payload.get("title", "")).strip()
+              description = str(payload.get("description", "")).strip()
+              category = str(payload.get("category", "other")).strip().lower() or "other"
+              part_group = str(payload.get("part_group", "")).strip()
+              part_number = str(payload.get("part_number", "")).strip()
+
+              item["display_title"] = title
+              item["description"] = description
+              item["category"] = category
+              if part_group:
+                  item["part_group"] = part_group
+              else:
+                  item.pop("part_group", None)
+              if part_number:
+                  try:
+                      item["part_number"] = int(part_number)
+                  except ValueError:
+                      raise SystemExit("part_number must be a number")
+              else:
+                  item.pop("part_number", None)
+              break
+
+          if not found:
+              raise SystemExit(f"No item found for message_id {message_id}")
+
+          path.write_text(json.dumps(items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Commit edit
+        run: |
+          git config user.name "site-edit[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add content.json
+          git diff --cached --quiet || git commit -m "Edit site item from admin"
+          git push
+
+      - name: Close edit request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue close "${{ github.event.issue.number }}" --comment "✅ Site edit applied successfully."
