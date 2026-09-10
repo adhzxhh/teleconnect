@@ -31,6 +31,52 @@ function formatDate(value) {
   return String(value);
 }
 
+// Detect names such as "Part 1", "part1", "Part-1", "Pt 1" and "pt1".
+function partInfo(item) {
+  const name = String(item.filename || item.title || "").trim();
+  const match = name.match(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?(\d+)(?=\b|[._\-])/i);
+  if (!match) return null;
+
+  const partNumber = Number(match[1]);
+  const base = name
+    .replace(/\.[^.]+$/, "")
+    .replace(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?\d+(?=\b|[._\-])/ig, "")
+    .replace(/[._\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+  return { key: base, partNumber };
+}
+
+function groupItems(source) {
+  const groups = [];
+  const grouped = new Map();
+
+  source.forEach(item => {
+    const info = partInfo(item);
+    if (!info) {
+      groups.push({ single: item });
+      return;
+    }
+
+    const groupKey = `${String(item.category || "other").toLowerCase()}::${info.key}`;
+    if (!grouped.has(groupKey)) {
+      const group = { parts: [], first: item, key: groupKey };
+      grouped.set(groupKey, group);
+      groups.push(group);
+    }
+    grouped.get(groupKey).parts.push({ item, partNumber: info.partNumber });
+  });
+
+  groups.forEach(group => {
+    if (!group.parts) return;
+    group.parts.sort((a, b) => a.partNumber - b.partNumber);
+  });
+
+  return groups;
+}
+
 function render() {
   const q = search.value.toLowerCase().trim();
   const category = filter.value;
@@ -40,34 +86,79 @@ function render() {
       (`${item.title || ""} ${item.description || ""}`.toLowerCase().includes(q));
   });
 
-  grid.innerHTML = filtered.map(item => {
-    const type = String(item.type || "LINK").toUpperCase();
-    const icon = item.icon || (type === "FILE" ? "📦" : type === "IMAGE" ? "🖼️" : type === "VIDEO" ? "🎬" : "🔗");
-    const url = item.url || TELEGRAM_CHANNEL_URL;
-    const downloadUrl = item.download_url || "";
-    const action = downloadUrl
-      ? `<a class="btn primary" href="${escapeAttr(downloadUrl)}" download="${escapeAttr(item.filename || "")}">DOWNLOAD ↓</a>`
-      : `<a class="btn primary" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">${type === "LINK" ? "OPEN ↗" : "VIEW →"}</a>`;
+  const groups = groupItems(filtered);
 
-    return `
-      <article class="card">
-        <div class="thumb">
-          <span class="badge">${escapeHtml(type)}</span>
-          <span>${escapeHtml(icon)}</span>
-        </div>
-        <div class="card-body">
-          <h3>${escapeHtml(item.title || "Telegram post")}</h3>
-          <p>${escapeHtml(item.description || "")}</p>
-          <div class="card-footer">
-            <span class="meta">${escapeHtml(formatDate(item.date))}</span>
-            ${action}
-          </div>
-        </div>
-      </article>
-    `;
+  grid.innerHTML = groups.map(group => {
+    if (group.single) return renderSingle(group.single);
+    return renderGroup(group);
   }).join("");
 
-  empty.hidden = filtered.length !== 0;
+  empty.hidden = groups.length !== 0;
+}
+
+function renderSingle(item) {
+  const type = String(item.type || "FILE").toUpperCase();
+  const icon = item.icon || (type === "FILE" ? "📦" : type === "IMAGE" ? "🖼️" : "🎬");
+  const url = item.url || TELEGRAM_CHANNEL_URL;
+  const downloadUrl = item.download_url || "";
+  const action = downloadUrl
+    ? `<a class="btn primary" href="${escapeAttr(downloadUrl)}" download="${escapeAttr(item.filename || "")}">DOWNLOAD ↓</a>`
+    : `<a class="btn primary" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">VIEW →</a>`;
+
+  return `
+    <article class="card">
+      <div class="thumb">
+        <span class="badge">${escapeHtml(type)}</span>
+        <span>${escapeHtml(icon)}</span>
+      </div>
+      <div class="card-body">
+        <h3>${escapeHtml(item.title || "Telegram file")}</h3>
+        <p>${escapeHtml(item.description || "")}</p>
+        <div class="card-footer">
+          <span class="meta">${escapeHtml(formatDate(item.date))}</span>
+          ${action}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderGroup(group) {
+  const first = group.first;
+  const count = group.parts.length;
+  const title = String(first.filename || first.title || "Multi-part file")
+    .replace(/\.[^.]+$/, "")
+    .replace(/(?:^|[ ._\-])(?:part|pt)[ ._\-]?\d+/i, "")
+    .replace(/[._\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const category = String(first.category || "other").toUpperCase();
+
+  const buttons = group.parts.map(({ item, partNumber }) => {
+    const url = item.download_url || item.url || TELEGRAM_CHANNEL_URL;
+    const label = item.download_url ? `PART ${partNumber} ↓` : `PART ${partNumber} →`;
+    const attrs = item.download_url
+      ? `href="${escapeAttr(url)}" download="${escapeAttr(item.filename || "")}"`
+      : `href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer"`;
+    return `<a class="btn primary" ${attrs}>${label}</a>`;
+  }).join("");
+
+  return `
+    <article class="card multipart-card">
+      <div class="thumb">
+        <span class="badge">${escapeHtml(category)}</span>
+        <span>🧩</span>
+      </div>
+      <div class="card-body">
+        <h3>${escapeHtml(title || "Multi-part file")}</h3>
+        <p>${count} parts · Select a part to download</p>
+        <div class="card-footer multipart-footer">
+          <span class="meta">${escapeHtml(formatDate(first.date))}</span>
+          <div class="part-buttons">${buttons}</div>
+        </div>
+      </div>
+    </article>
+  `;
 }
 
 function escapeHtml(value) {
