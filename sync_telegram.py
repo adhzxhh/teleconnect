@@ -73,7 +73,6 @@ def download_file(file_id, filename):
     return destination.as_posix()
 
 
-# Verify the bot token and report webhook status without exposing the token.
 bot = call("getMe")
 print(f"Bot connected: @{bot.get('username', '(no username)')}")
 webhook = call("getWebhookInfo")
@@ -104,8 +103,18 @@ updates = call("getUpdates", params)
 print(f"Telegram updates received: {len(updates)}")
 
 max_update = int(state.get("offset", 0)) - 1
-seen = {str(x.get("update_id")) for x in items if isinstance(x, dict)}
+
+# update_id is the primary duplicate key. message_id is also tracked as a safety net
+# because Telegram message IDs are unique within a chat and forwarded/retried updates
+# can otherwise be represented differently in stored data.
+seen_updates = {str(x.get("update_id")) for x in items if isinstance(x, dict) and x.get("update_id") is not None}
+seen_messages = {
+    str(x.get("message_id"))
+    for x in items
+    if isinstance(x, dict) and x.get("message_id") is not None
+}
 new_items = 0
+skipped_duplicates = 0
 
 for update in updates:
     update_id = update.get("update_id")
@@ -118,9 +127,11 @@ for update in updates:
         continue
 
     chat = msg.get("chat", {})
-    print(f"Group message received: chat={chat.get('title', '(untitled)')} id={chat.get('id')} message_id={msg.get('message_id')}")
+    message_id = msg.get("message_id")
+    print(f"Group message received: chat={chat.get('title', '(untitled)')} id={chat.get('id')} message_id={message_id}")
 
-    if str(update_id) in seen:
+    if str(update_id) in seen_updates or str(message_id) in seen_messages:
+        skipped_duplicates += 1
         continue
 
     text = (msg.get("caption") or msg.get("text") or "").strip()
@@ -135,19 +146,19 @@ for update in updates:
     try:
         if msg.get("document"):
             doc = msg["document"]
-            filename = safe_filename(doc.get("file_name"), f"telegram_{msg.get('message_id')}.bin")
+            filename = safe_filename(doc.get("file_name"), f"telegram_{message_id}.bin")
             item_type, icon = "FILE", "📦"
-            download_url = download_file(doc["file_id"], f"{msg.get('message_id')}_{filename}")
+            download_url = download_file(doc["file_id"], f"{message_id}_{filename}")
         elif msg.get("photo"):
             photo = msg["photo"][-1]
-            filename = f"{msg.get('message_id')}.jpg"
+            filename = f"{message_id}.jpg"
             item_type, icon = "IMAGE", "🖼️"
             download_url = download_file(photo["file_id"], filename)
         elif msg.get("video"):
             video = msg["video"]
-            filename = safe_filename(video.get("file_name"), f"telegram_{msg.get('message_id')}.mp4")
+            filename = safe_filename(video.get("file_name"), f"telegram_{message_id}.mp4")
             item_type, icon = "VIDEO", "🎬"
-            download_url = download_file(video["file_id"], f"{msg.get('message_id')}_{filename}")
+            download_url = download_file(video["file_id"], f"{message_id}_{filename}")
         else:
             continue
     except Exception as exc:
@@ -160,25 +171,28 @@ for update in updates:
 
     items.insert(0, {
         "update_id": str(update_id),
-        "message_id": msg.get("message_id"),
+        "message_id": message_id,
         "title": title,
         "description": description,
         "category": category(text),
         "type": item_type,
         "icon": icon,
         "date": msg.get("date", 0),
-        "url": post_url(chat, msg.get("message_id")),
+        "url": post_url(chat, message_id),
         "download_url": download_url,
         "filename": filename,
     })
+    seen_updates.add(str(update_id))
+    if message_id is not None:
+        seen_messages.add(str(message_id))
     new_items += 1
 
 items = items[:200]
 DATA.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
 
-# Only advance the offset after Telegram has successfully returned the queue.
 if max_update >= int(state.get("offset", 0)):
     STATE.write_text(json.dumps({"offset": max_update + 1}), encoding="utf-8")
 
 print(f"New posts stored this run: {new_items}")
+print(f"Duplicate messages skipped: {skipped_duplicates}")
 print(f"Total posts stored: {len(items)}")
