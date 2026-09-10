@@ -33,13 +33,10 @@ def category(text):
     return m.group(1).strip().lower() if m else "tools"
 
 
-def clean_title(text, filename=""):
-    first = next((x.strip() for x in text.splitlines() if x.strip()), "")
-    if first and not re.match(r"^(category|cat)\s*:", first, re.I):
-        return first[:100]
-    if filename:
-        return filename[:100]
-    return "Telegram post"
+def clean_caption(text):
+    lines = [x.strip() for x in text.splitlines() if x.strip()]
+    lines = [x for x in lines if not re.match(r"^(category|cat)\s*:", x, re.I)]
+    return "\n".join(lines)[:500]
 
 
 def post_url(chat, message_id):
@@ -89,6 +86,9 @@ items = load_json(DATA, [])
 if not isinstance(items, list):
     items = []
 
+# Keep only website-supported content. Plain text and normal links are excluded.
+items = [x for x in items if isinstance(x, dict) and str(x.get("type", "")).upper() in {"FILE", "IMAGE", "VIDEO"}]
+
 state = load_json(STATE, {})
 if not isinstance(state, dict):
     state = {}
@@ -123,9 +123,11 @@ for update in updates:
     if str(update_id) in seen:
         continue
 
-    text = (msg.get("text") or msg.get("caption") or "").strip()
+    text = (msg.get("caption") or msg.get("text") or "").strip()
     has_media = bool(msg.get("document") or msg.get("photo") or msg.get("video"))
-    if not text and not has_media:
+
+    # Ignore plain text and normal links. Only files, images and videos become website posts.
+    if not has_media:
         continue
 
     download_url = ""
@@ -147,13 +149,14 @@ for update in updates:
             item_type, icon = "VIDEO", "🎬"
             download_url = download_file(video["file_id"], f"{msg.get('message_id')}_{filename}")
         else:
-            item_type, icon = "LINK", "🔗"
+            continue
     except Exception as exc:
         print(f"Media download failed; keeping Telegram link: {exc}")
         download_url = ""
 
-    title = clean_title(text, filename)
-    description = text[:500] if text else filename
+    caption = clean_caption(text)
+    title = filename or "Telegram file"
+    description = caption or filename
 
     items.insert(0, {
         "update_id": str(update_id),
