@@ -30,26 +30,17 @@ jobs:
               raise SystemExit("No JSON edit block found")
 
           payload = json.loads(match.group(1))
-          message_id = str(payload.get("message_id", "")).strip()
-          if not message_id:
-              raise SystemExit("Missing message_id")
-
           path = Path("content.json")
           items = json.loads(path.read_text(encoding="utf-8"))
           if not isinstance(items, list):
               raise SystemExit("content.json is not a list")
 
-          found = False
-          for item in items:
-              if str(item.get("message_id", "")) != message_id:
-                  continue
-              found = True
-              title = str(payload.get("title", "")).strip()
-              description = str(payload.get("description", "")).strip()
-              category = str(payload.get("category", "other")).strip().lower() or "other"
-              part_group = str(payload.get("part_group", "")).strip()
-              part_number = str(payload.get("part_number", "")).strip()
-
+          def apply_one(item, data):
+              title = str(data.get("title", "")).strip()
+              description = str(data.get("description", "")).strip()
+              category = str(data.get("category", "other")).strip().lower() or "other"
+              part_group = str(data.get("part_group", "")).strip()
+              part_number = str(data.get("part_number", "")).strip()
               item["display_title"] = title
               item["description"] = description
               item["category"] = category
@@ -58,16 +49,44 @@ jobs:
               else:
                   item.pop("part_group", None)
               if part_number:
-                  try:
-                      item["part_number"] = int(part_number)
-                  except ValueError:
-                      raise SystemExit("part_number must be a number")
+                  if not part_number.isdigit() or int(part_number) < 1:
+                      raise SystemExit("part_number must be a number >= 1")
+                  item["part_number"] = int(part_number)
               else:
                   item.pop("part_number", None)
-              break
 
+          primary_id = str(payload.get("message_id", "")).strip()
+          if not primary_id:
+              raise SystemExit("Missing message_id")
+
+          found = False
+          for item in items:
+              if str(item.get("message_id", "")) == primary_id:
+                  apply_one(item, payload)
+                  found = True
+                  break
           if not found:
-              raise SystemExit(f"No item found for message_id {message_id}")
+              raise SystemExit(f"No item found for message_id {primary_id}")
+
+          # A multipart edit can contain the complete set of part-number changes.
+          # Apply every requested part by message_id, not just the item used to open the menu.
+          for part in payload.get("parts", []):
+              part_id = str(part.get("message_id", "")).strip()
+              if not part_id:
+                  continue
+              number = str(part.get("part_number", "")).strip()
+              if not number.isdigit() or int(number) < 1:
+                  raise SystemExit(f"Invalid part number for message_id {part_id}")
+              matched = False
+              for item in items:
+                  if str(item.get("message_id", "")) == part_id:
+                      item["part_number"] = int(number)
+                      if payload.get("part_group", "").strip():
+                          item["part_group"] = payload["part_group"].strip()
+                      matched = True
+                      break
+              if not matched:
+                  raise SystemExit(f"No item found for multipart message_id {part_id}")
 
           path.write_text(json.dumps(items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           PY
